@@ -41,7 +41,7 @@ jobs:
           flutter config --enable-windows-desktop
           flutter pub get
           dart run flutter_launcher_icons
-          flutter build windows --release
+          flutter build windows --release --no-tree-shake-icons
 
       - name: Package Windows x64 EXE, Portable ZIP, and MSI
         shell: pwsh
@@ -85,7 +85,7 @@ jobs:
           flutter config --enable-linux-desktop
           flutter pub get
           dart run flutter_launcher_icons
-          flutter build linux --release
+          flutter build linux --release --no-tree-shake-icons
 
       - name: Package Linux x64 TAR.GZ, DEB, RPM, and AppImage
         run: |
@@ -199,7 +199,7 @@ jobs:
           flutter config --enable-macos-desktop
           flutter pub get
           dart run flutter_launcher_icons
-          flutter build macos --release
+          flutter build macos --release --no-tree-shake-icons
           mkdir -p dist/macos-arm64 dmg_staging_arm64
           cp -r build/macos/Build/Products/Release/drews_pdf_studio.app dmg_staging_arm64/
           hdiutil create -volname "Drew's PDF Studio" -srcfolder dmg_staging_arm64 -ov -format UDZO "dist/macos-arm64/drews_pdf_studio-${TAG_NAME}-macos-arm64.dmg"
@@ -223,7 +223,7 @@ jobs:
           flutter config --enable-macos-desktop
           flutter pub get
           dart run flutter_launcher_icons
-          flutter build macos --release
+          flutter build macos --release --no-tree-shake-icons
           mkdir -p dist/macos-x64 dmg_staging_x64
           APP_PATH="build/macos/Build/Products/Release/drews_pdf_studio.app"
           cp -r "$APP_PATH" dmg_staging_x64/
