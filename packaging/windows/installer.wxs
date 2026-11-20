@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Drew's PDF Studio"
+           Manufacturer="Kutlwano Maruatona"
+           Version="1.0.0.0"
+           Language="1033"
+           UpgradeCode="8E6F7A2B-4C1D-4E9A-B3F2-112233445566">
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="Drew's PDF Studio Installer" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Drew's PDF Studio is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="ProductFeature" Title="Drew's PDF Studio" Level="1">
+      <ComponentGroupRef Id="AppFilesGroup" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Drew's PDF Studio" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="AppMenuFolder" Name="Drew's PDF Studio" />
+      </Directory>
+    </Directory>
+
+    <DirectoryRef Id="AppMenuFolder">
+      <Component Id="ApplicationShortcut" Guid="9A1B2C3D-4E5F-6789-ABCD-EF0123456789">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="Drew's PDF Studio"
+                  Description="Launch Drew's PDF Studio"
+                  Target="[INSTALLFOLDER]drews_pdf_studio.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveAppMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Drew\DrewSPDFStudio"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <ComponentGroup Id="AppFilesGroup" Directory="INSTALLFOLDER">
+      <!-- Populated or harvested from build/windows/x64/runner/Release in CI -->
+    </ComponentGroup>
+  </Product>
+</Wix>

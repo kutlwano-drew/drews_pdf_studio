@@ -1,0 +1,24 @@
+name: drews-pdf-studio
+base: core24
+version: "1.0.0"
+summary: Desktop PDF studio application
+description: |
+  A desktop PDF studio application built with Flutter.
+grade: stable
+confinement: strict
+
+apps:
+  drews-pdf-studio:
+    command: drews_pdf_studio
+    extensions: [gnome]
+    plugs:
+      - home
+      - removable-media
+      - network
+
+parts:
+  drews-pdf-studio:
+    plugin: dump
+    source: build/linux/x64/release/bundle
+    organize:
+      "*": ./

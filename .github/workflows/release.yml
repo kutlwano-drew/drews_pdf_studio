@@ -1,0 +1,258 @@
+name: Build and Release All Platforms
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  source-archives:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create source archives
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          mkdir -p dist/source
+          git archive --format=zip --prefix="drews_pdf_studio-${TAG_NAME}/" HEAD -o "dist/source/drews_pdf_studio-${TAG_NAME}-source.zip"
+          git archive --format=tar.gz --prefix="drews_pdf_studio-${TAG_NAME}/" HEAD -o "dist/source/drews_pdf_studio-${TAG_NAME}-source.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-archives
+          path: dist/source/*
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Configure Windows desktop and build release
+        run: |
+          flutter config --enable-windows-desktop
+          flutter pub get
+          dart run flutter_launcher_icons
+          flutter build windows --release
+
+      - name: Package Windows x64 EXE, Portable ZIP, and MSI
+        shell: pwsh
+        run: |
+          $tag = "${{ env.GITHUB_REF_NAME }}"
+          $releaseDir = "build\windows\x64\runner\Release"
+          $outDir = "dist\windows"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          # 1. Standalone EXE copy
+          Copy-Item "$releaseDir\drews_pdf_studio.exe" "$outDir\drews_pdf_studio-${tag}-windows-x64.exe"
+
+          # 2. Portable ZIP
+          Compress-Archive -Path "$releaseDir\*" -DestinationPath "$outDir\drews_pdf_studio-${tag}-windows-x64-portable.zip" -Force
+
+          # 3. MSI via WiX Toolset
+          dotnet tool install --global wix --version 4.0.5
+          $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
+          wix build packaging\windows\installer.wxs -arch x64 -b "$releaseDir" -o "$outDir\drews_pdf_studio-${tag}-windows-x64.msi"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: dist/windows/*
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Install Linux build and packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev dpkg-dev rpm squashfs-tools wget
+
+      - name: Build Linux release bundle
+        run: |
+          flutter config --enable-linux-desktop
+          flutter pub get
+          dart run flutter_launcher_icons
+          flutter build linux --release
+
+      - name: Package Linux x64 TAR.GZ, DEB, RPM, and AppImage
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          VERSION_CLEAN="${TAG_NAME#v}"
+          BUNDLE_DIR="build/linux/x64/release/bundle"
+          OUT_DIR="dist/linux"
+          mkdir -p "$OUT_DIR"
+
+          # 1. Linux x64 .tar.gz
+          tar -czf "$OUT_DIR/drews_pdf_studio-${TAG_NAME}-linux-x64.tar.gz" -C "$BUNDLE_DIR" .
+
+          # 2. Linux amd64 .deb
+          DEB_ROOT="build/pkg_deb"
+          rm -rf "$DEB_ROOT"
+          mkdir -p "$DEB_ROOT/DEBIAN" "$DEB_ROOT/opt/drews_pdf_studio" "$DEB_ROOT/usr/bin" "$DEB_ROOT/usr/share/applications" "$DEB_ROOT/usr/share/pixmaps"
+          cp -r "$BUNDLE_DIR"/* "$DEB_ROOT/opt/drews_pdf_studio/"
+          ln -sf /opt/drews_pdf_studio/drews_pdf_studio "$DEB_ROOT/usr/bin/drews_pdf_studio"
+          cp packaging/linux/drews_pdf_studio.desktop "$DEB_ROOT/usr/share/applications/"
+          cp assets/images/logo.png "$DEB_ROOT/usr/share/pixmaps/drews_pdf_studio.png"
+          cat <<EOF > "$DEB_ROOT/DEBIAN/control"
+          Package: drews-pdf-studio
+          Version: ${VERSION_CLEAN}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Kutlwano Maruatona <dev@drewspackages.web.app>
+          Description: Desktop PDF studio application built with Flutter.
+          EOF
+          dpkg-deb --build "$DEB_ROOT" "$OUT_DIR/drews_pdf_studio-${TAG_NAME}-linux-amd64.deb"
+
+          # 3. Linux x86_64 .rpm
+          RPM_ROOT="$PWD/build/pkg_rpm"
+          rm -rf "$RPM_ROOT"
+          mkdir -p "$RPM_ROOT"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          cat <<EOF > "$RPM_ROOT/SPECS/drews_pdf_studio.spec"
+          Name: drews-pdf-studio
+          Version: ${VERSION_CLEAN}
+          Release: 1
+          Summary: Desktop PDF studio application built with Flutter
+          License: MIT
+          BuildArch: x86_64
+
+          %description
+          Desktop PDF studio application built with Flutter.
+
+          %install
+          mkdir -p %{buildroot}/opt/drews_pdf_studio
+          mkdir -p %{buildroot}/usr/bin
+          mkdir -p %{buildroot}/usr/share/applications
+          mkdir -p %{buildroot}/usr/share/pixmaps
+          cp -r $PWD/$BUNDLE_DIR/* %{buildroot}/opt/drews_pdf_studio/
+          ln -sf /opt/drews_pdf_studio/drews_pdf_studio %{buildroot}/usr/bin/drews_pdf_studio
+          cp $PWD/packaging/linux/drews_pdf_studio.desktop %{buildroot}/usr/share/applications/
+          cp $PWD/assets/images/logo.png %{buildroot}/usr/share/pixmaps/drews_pdf_studio.png
+
+          %files
+          /opt/drews_pdf_studio
+          /usr/bin/drews_pdf_studio
+          /usr/share/applications/drews_pdf_studio.desktop
+          /usr/share/pixmaps/drews_pdf_studio.png
+          EOF
+          rpmbuild --define "_topdir $RPM_ROOT" -bb "$RPM_ROOT/SPECS/drews_pdf_studio.spec"
+          cp "$RPM_ROOT/RPMS/x86_64/"*.rpm "$OUT_DIR/drews_pdf_studio-${TAG_NAME}-linux-x86_64.rpm"
+
+          # 4. Linux x86-64 .AppImage
+          APPDIR="build/AppDir"
+          rm -rf "$APPDIR"
+          mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+          cp -r "$BUNDLE_DIR"/* "$APPDIR/usr/bin/"
+          cp packaging/linux/drews_pdf_studio.desktop "$APPDIR/drews_pdf_studio.desktop"
+          cp packaging/linux/drews_pdf_studio.desktop "$APPDIR/usr/share/applications/"
+          cp assets/images/logo.png "$APPDIR/drews_pdf_studio.png"
+          cp assets/images/logo.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/drews_pdf_studio.png"
+          cat <<EOF > "$APPDIR/AppRun"
+          #!/bin/sh
+          HERE="\$(dirname "\$(readlink -f "\${0}")")"
+          exec "\$HERE/usr/bin/drews_pdf_studio" "\$@"
+          EOF
+          chmod +x "$APPDIR/AppRun"
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O /tmp/appimagetool
+          chmod +x /tmp/appimagetool
+          ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run "$APPDIR" "$OUT_DIR/drews_pdf_studio-${TAG_NAME}-linux-x86_64.AppImage"
+
+      - uses: snapcore/action-build@v1
+        with:
+          snap: .
+
+      - name: Move built Snap to dist
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          mkdir -p dist/linux
+          mv ./*.snap "dist/linux/drews_pdf_studio-${TAG_NAME}-linux-x64.snap"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: dist/linux/*
+
+  build-macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Build macOS arm64 and package DMG
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          flutter config --enable-macos-desktop
+          flutter pub get
+          dart run flutter_launcher_icons
+          flutter build macos --release
+          mkdir -p dist/macos-arm64 dmg_staging_arm64
+          cp -r build/macos/Build/Products/Release/drews_pdf_studio.app dmg_staging_arm64/
+          hdiutil create -volname "Drew's PDF Studio" -srcfolder dmg_staging_arm64 -ov -format UDZO "dist/macos-arm64/drews_pdf_studio-${TAG_NAME}-macos-arm64.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-artifacts
+          path: dist/macos-arm64/*
+
+  build-macos-x64:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Build macOS x64 and package ZIP and DMG
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          flutter config --enable-macos-desktop
+          flutter pub get
+          dart run flutter_launcher_icons
+          flutter build macos --release
+          mkdir -p dist/macos-x64 dmg_staging_x64
+          APP_PATH="build/macos/Build/Products/Release/drews_pdf_studio.app"
+          cp -r "$APP_PATH" dmg_staging_x64/
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "dist/macos-x64/drews_pdf_studio-${TAG_NAME}-macos-x64.zip"
+          hdiutil create -volname "Drew's PDF Studio" -srcfolder dmg_staging_x64 -ov -format UDZO "dist/macos-x64/drews_pdf_studio-${TAG_NAME}-macos-x64.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64-artifacts
+          path: dist/macos-x64/*
+
+  publish-release:
+    needs:
+      - source-archives
+      - build-windows
+      - build-linux
+      - build-macos-arm64
+      - build-macos-x64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release_assets
+
+      - name: Collect release artifacts
+        run: |
+          mkdir -p final_assets
+          find release_assets -type f -exec cp {} final_assets/ \;
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: final_assets/*
